@@ -76,6 +76,7 @@ def download_audio_from_url(url: str, temp_dir: Path) -> DownloadedVideo:
         output_template,
         "--print",
         "after_move:filepath",
+        *yt_dlp_cookie_options(),
         url,
     ]
 
@@ -125,6 +126,7 @@ def get_video_metadata(url: str, timeout: int) -> dict:
         "--no-warnings",
         "--socket-timeout",
         os.getenv("YTDLP_SOCKET_TIMEOUT_SECONDS", "20"),
+        *yt_dlp_cookie_options(),
         url,
     ]
 
@@ -177,6 +179,17 @@ def yt_dlp_command_prefix() -> list[str]:
     return [sys.executable, "-m", "yt_dlp"]
 
 
+def yt_dlp_cookie_options() -> list[str]:
+    cookies_file = os.getenv("YTDLP_COOKIES_FILE", "").strip()
+    if not cookies_file:
+        return []
+
+    path = Path(cookies_file).expanduser()
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"YTDLP_COOKIES_FILE does not point to a readable file: {path}")
+    return ["--cookies", str(path)]
+
+
 def ensure_ffmpeg() -> None:
     if shutil.which("ffmpeg") is None:
         raise FileNotFoundError("FFmpeg is not installed or not available on PATH.")
@@ -191,7 +204,7 @@ def classify_yt_dlp_error(message: str) -> str:
     if "unavailable" in lowered or "not available" in lowered:
         return "Video unavailable. It may be removed, blocked, or region-restricted."
     if "age" in lowered:
-        return "Age-restricted video. yt-dlp cannot access it without additional authentication."
+        return "Age-restricted video. Set YTDLP_COOKIES_FILE to a valid cookies.txt file from your own YouTube login, then restart the backend."
     if "file is larger than max-filesize" in lowered:
         return f"Video too large. Maximum download size is {os.getenv('VIDEO_MAX_FILE_SIZE', '500M')}."
     return f"yt-dlp download failure: {message}"

@@ -65,6 +65,8 @@ yt-dlp --version
 
 YouTube downloading depends on `yt-dlp` and may fail for private, age-restricted, region-blocked, unavailable, copyrighted, or DRM-protected videos. Users are responsible for complying with platform terms and copyright laws.
 
+Age-restricted videos require authenticated YouTube cookies from your own account. Export cookies in Netscape `cookies.txt` format and set `YTDLP_COOKIES_FILE` to that file path. Do not commit cookies files or share them with other users.
+
 ## Frontend Setup
 
 Open a second terminal:
@@ -156,6 +158,7 @@ VIDEO_MAX_DURATION_SECONDS=1800
 VIDEO_MAX_FILE_SIZE=500M
 YTDLP_TIMEOUT_SECONDS=600
 YTDLP_SOCKET_TIMEOUT_SECONDS=20
+YTDLP_COOKIES_FILE=
 ```
 
 Useful Whisper model sizes include `tiny`, `base`, `small`, `medium`, and `large-v3`. Larger models are more accurate but slower and require more memory.
@@ -251,6 +254,22 @@ yt-dlp --version
 ```
 
 Private, unavailable, age-restricted, region-blocked, copyrighted, and DRM-protected videos may fail even when the URL is valid.
+
+For age-restricted videos, use cookies from your own YouTube login:
+
+```bash
+# Example only: use your actual exported cookies.txt path.
+YTDLP_COOKIES_FILE=/Users/you/Downloads/youtube-cookies.txt \
+  uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+If you use `backend/.env`, add:
+
+```bash
+YTDLP_COOKIES_FILE=/Users/you/Downloads/youtube-cookies.txt
+```
+
+Restart the backend after changing this value. Keep cookies private; they can grant access to your logged-in YouTube session.
 
 ### Video too long or too large
 
