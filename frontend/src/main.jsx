@@ -77,7 +77,7 @@ function App() {
       setResult(data);
       setStatus('complete');
     } catch (requestError) {
-      setError(requestError.message || 'Processing failed.');
+      setError(formatRequestError(requestError));
       setStatus('error');
     }
   }
@@ -112,7 +112,7 @@ function App() {
       setResult(data);
       setStatus('complete');
     } catch (requestError) {
-      setError(requestError.message || 'Processing failed.');
+      setError(formatRequestError(requestError));
       setStatus('error');
     } finally {
       if (stageTimer) window.clearInterval(stageTimer);
@@ -326,6 +326,13 @@ function stripExtension(name) {
 function downloadBaseName(result, file) {
   if (result?.video_title) return result.video_title.replace(/[^a-z0-9-]+/gi, '-').replace(/^-|-$/g, '') || 'video';
   return stripExtension(file?.name || 'transcription');
+}
+
+function formatRequestError(error) {
+  if (error?.message === 'Failed to fetch') {
+    return `Cannot reach the backend at ${API_URL}. Start FastAPI on port 8000, then try again.`;
+  }
+  return error?.message || 'Processing failed.';
 }
 
 createRoot(document.getElementById('root')).render(<App />);
