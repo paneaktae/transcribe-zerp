@@ -1,6 +1,6 @@
 # Local Transcribe to Thai
 
-A simple full-stack app for uploading an audio/video clip or pasting a YouTube URL, transcribing speech locally with `faster-whisper`, and translating the transcript into Thai with a local Hugging Face translation model.
+A simple full-stack app for uploading audio/video files or live-translating a YouTube video while it plays in the browser. Speech is transcribed locally with `faster-whisper` and translated into Thai with a local Hugging Face translation model.
 
 ## Project Structure
 
@@ -18,7 +18,6 @@ README.md
 - Python 3.10 or 3.11 recommended
 - Node.js 20 or newer
 - FFmpeg
-- yt-dlp
 - Enough disk space for local model downloads
 
 The default Whisper model is `small` on CPU with `int8` compute. The default translation model is `facebook/nllb-200-distilled-600M`, which is free and local after download, but can be large on first run.
@@ -51,21 +50,7 @@ brew install ffmpeg
 ffmpeg -version
 ```
 
-The backend uses FFmpeg to normalize uploaded audio, extract audio from video files, and convert downloaded URL audio before transcription.
-
-## yt-dlp Setup
-
-`yt-dlp` is included in `backend/requirements.txt`, so `pip install -r requirements.txt` installs it into the virtual environment.
-
-You can verify it with:
-
-```bash
-yt-dlp --version
-```
-
-YouTube downloading depends on `yt-dlp` and may fail for private, age-restricted, region-blocked, unavailable, copyrighted, or DRM-protected videos. Users are responsible for complying with platform terms and copyright laws.
-
-Age-restricted videos require authenticated YouTube cookies from your own account. Export cookies in Netscape `cookies.txt` format and set `YTDLP_COOKIES_FILE` to that file path. Do not commit cookies files or share them with other users.
+The backend uses FFmpeg to normalize uploaded files and browser-recorded audio chunks before transcription.
 
 ## Frontend Setup
 
@@ -85,6 +70,22 @@ To point the frontend at a different backend URL:
 VITE_API_URL=http://localhost:8000 npm run dev
 ```
 
+## Live YouTube Translation
+
+The app does not download YouTube videos and does not use `yt-dlp` for live video translation.
+
+Browsers generally do not allow a web app to directly read audio from an embedded YouTube iframe because of cross-origin and media security restrictions. The supported workflow uses browser tab audio capture:
+
+1. Paste a YouTube URL in `Live video translation`.
+2. Play the video in the embedded player.
+3. Click `Start live translation`.
+4. In the browser picker, choose the current tab or the tab containing the video.
+5. Enable `Share tab audio`.
+
+The app records small tab-audio chunks with `MediaRecorder`, sends them to `POST /api/transcribe-chunk`, and appends transcript and Thai translation as chunks finish.
+
+Chrome and Edge generally support tab audio capture. Safari and Firefox support may be limited. If tab audio is unavailable, use the microphone fallback, play the video through speakers, and expect lower audio quality.
+
 ## Deployment
 
 Deploy the frontend and backend separately.
@@ -93,7 +94,6 @@ The Vite frontend can run on Vercel. The FastAPI backend should run on a server 
 
 - long-running Python processes
 - FFmpeg
-- yt-dlp
 - large model downloads
 - enough CPU and memory for `faster-whisper` and the translation model
 
@@ -137,8 +137,6 @@ CORS_ALLOW_ORIGINS=https://transcribe-zerp.vercel.app
 WHISPER_MODEL_SIZE=small
 WHISPER_DEVICE=cpu
 WHISPER_COMPUTE_TYPE=int8
-VIDEO_MAX_DURATION_SECONDS=1800
-VIDEO_MAX_FILE_SIZE=500M
 ```
 
 After the backend has a public HTTPS URL, enter it in the frontend `Backend API URL` field or redeploy the frontend with `VITE_API_URL` set to that URL.
@@ -156,9 +154,6 @@ TRANSLATION_MAX_CHUNK_CHARS=1200
 CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 VIDEO_MAX_DURATION_SECONDS=1800
 VIDEO_MAX_FILE_SIZE=500M
-YTDLP_TIMEOUT_SECONDS=600
-YTDLP_SOCKET_TIMEOUT_SECONDS=20
-YTDLP_COOKIES_FILE=
 ```
 
 Useful Whisper model sizes include `tiny`, `base`, `small`, `medium`, and `large-v3`. Larger models are more accurate but slower and require more memory.
@@ -191,53 +186,38 @@ Example response:
 }
 ```
 
-### Paste Video URL
+### Transcribe Audio Chunk
 
-`POST /api/transcribe-url`
+`POST /api/transcribe-chunk`
 
-Accepts JSON:
+Accepts `multipart/form-data`:
 
-```json
-{
-  "url": "https://www.youtube.com/watch?v=VIDEO_ID"
-}
-```
-
-Example curl request:
-
-```bash
-curl -X POST http://localhost:8000/api/transcribe-url \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://www.youtube.com/watch?v=VIDEO_ID"}'
-```
+- `file`: browser-recorded audio chunk, usually WebM/Opus
+- `chunk_id`: optional chunk identifier
 
 Example response:
 
 ```json
 {
-  "source_type": "url",
-  "source_url": "https://www.youtube.com/watch?v=VIDEO_ID",
-  "video_title": "Example video title",
+  "chunk_id": "chunk-123",
   "detected_language": "en",
-  "transcript": "Hello, this is a test.",
-  "translation_thai": "สวัสดี นี่คือการทดสอบ",
+  "transcript": "Hello from this audio chunk.",
+  "translation_thai": "สวัสดีจากส่วนเสียงนี้",
   "segments": [
     {
       "start": 0.0,
       "end": 4.2,
-      "text": "Hello, this is a test."
+      "text": "Hello from this audio chunk."
     }
   ]
 }
 ```
 
-The URL endpoint currently accepts HTTPS YouTube hosts first, disables playlists, rejects livestreams/upcoming videos, and applies duration, size, socket timeout, and overall `yt-dlp` timeout safeguards.
-
 ## Troubleshooting
 
 ### FFmpeg is missing
 
-If uploads fail with `FFmpeg is not installed or not available on PATH`, install it:
+If uploads or live chunks fail with `FFmpeg is not installed or not available on PATH`, install it:
 
 ```bash
 brew install ffmpeg
@@ -245,41 +225,13 @@ brew install ffmpeg
 
 Then restart the backend terminal so the updated `PATH` is available.
 
-### yt-dlp download failure
+### Tab Audio Capture Is Missing
 
-Make sure `yt-dlp` is installed in the active backend virtual environment:
+Use Chrome or Edge where possible. When the browser asks what to share, choose the current tab or the tab containing the video and enable `Share tab audio`. The app cannot directly read audio from the YouTube iframe.
 
-```bash
-yt-dlp --version
-```
+### Microphone Fallback Sounds Bad
 
-Private, unavailable, age-restricted, region-blocked, copyrighted, and DRM-protected videos may fail even when the URL is valid.
-
-For age-restricted videos, use cookies from your own YouTube login:
-
-```bash
-# Example only: use your actual exported cookies.txt path.
-YTDLP_COOKIES_FILE=/Users/you/Downloads/youtube-cookies.txt \
-  uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-If you use `backend/.env`, add:
-
-```bash
-YTDLP_COOKIES_FILE=/Users/you/Downloads/youtube-cookies.txt
-```
-
-Restart the backend after changing this value. Keep cookies private; they can grant access to your logged-in YouTube session.
-
-### Video too long or too large
-
-Adjust these values in `backend/.env`:
-
-```bash
-VIDEO_MAX_DURATION_SECONDS=1800
-VIDEO_MAX_FILE_SIZE=500M
-YTDLP_TIMEOUT_SECONDS=600
-```
+Microphone capture records room audio. Increase speaker volume, reduce background noise, and keep the microphone close to the speaker. Tab audio capture is preferred.
 
 ### CPU inference is slow
 

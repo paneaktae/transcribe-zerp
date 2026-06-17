@@ -2,28 +2,23 @@ import os
 import shutil
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import File, Form, FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from schemas import TranscribeUrlRequest, TranscriptionResponse
+from schemas import ChunkTranscriptionResponse, TranscriptionResponse
 from transcriber import WhisperTranscriber, extract_audio
 from translator import ThaiTranslator
-from video_downloader import (
-    UnsupportedUrlError,
-    VideoDownloadError,
-    VideoTooLargeError,
-    VideoTooLongError,
-    VideoUnavailableError,
-    download_audio_from_url,
-)
 
 
 load_dotenv(Path(__file__).with_name(".env"))
 
 ALLOWED_EXTENSIONS = {".mp3", ".wav", ".m4a", ".mp4", ".mov", ".aac", ".flac", ".ogg", ".webm"}
+CHUNK_EXTENSIONS = {".webm", ".ogg", ".wav", ".m4a", ".mp3", ".mp4"}
 
 app = FastAPI(title="Local Transcribe and Thai Translate API")
 
@@ -85,41 +80,56 @@ async def transcribe(file: UploadFile = File(...)) -> TranscriptionResponse:
             await file.close()
 
 
-@app.post("/api/transcribe-url", response_model=TranscriptionResponse)
-def transcribe_url(payload: TranscribeUrlRequest) -> TranscriptionResponse:
-    with tempfile.TemporaryDirectory(prefix="transcribe-url-") as temp_dir:
+@app.post("/api/transcribe-chunk", response_model=ChunkTranscriptionResponse)
+async def transcribe_chunk(
+    file: UploadFile = File(...),
+    chunk_id: Optional[str] = Form(default=None),
+) -> ChunkTranscriptionResponse:
+    extension = Path(file.filename or "").suffix.lower() or extension_from_content_type(file.content_type)
+    if extension not in CHUNK_EXTENSIONS:
+        allowed = ", ".join(sorted(CHUNK_EXTENSIONS))
+        raise HTTPException(status_code=400, detail=f"Unsupported audio chunk type. Allowed: {allowed}")
+
+    resolved_chunk_id = chunk_id or str(uuid.uuid4())
+
+    with tempfile.TemporaryDirectory(prefix="transcribe-chunk-") as temp_dir:
         temp_path = Path(temp_dir)
+        chunk_path = temp_path / f"chunk{extension}"
         audio_path = temp_path / "audio.wav"
 
         try:
-            downloaded = download_audio_from_url(str(payload.url), temp_path)
-            extract_audio(downloaded.audio_path, audio_path)
-            detected_language, transcript, segments = transcriber.transcribe(audio_path)
-            translation_thai = translator.translate(transcript, detected_language)
+            with chunk_path.open("wb") as output_file:
+                shutil.copyfileobj(file.file, output_file)
 
-            return TranscriptionResponse(
-                source_type="url",
-                source_url=downloaded.source_url,
-                video_title=downloaded.title,
+            extract_audio(chunk_path, audio_path)
+            detected_language, transcript, segments = transcriber.transcribe(audio_path)
+            translation_thai = translator.translate(transcript, detected_language) if transcript else ""
+
+            return ChunkTranscriptionResponse(
+                chunk_id=resolved_chunk_id,
                 detected_language=detected_language,
                 transcript=transcript,
                 translation_thai=translation_thai,
                 segments=segments,
             )
-        except UnsupportedUrlError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except VideoTooLongError as exc:
-            raise HTTPException(status_code=413, detail=str(exc)) from exc
-        except VideoTooLargeError as exc:
-            raise HTTPException(status_code=413, detail=str(exc)) from exc
-        except VideoUnavailableError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except FileNotFoundError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         except subprocess.CalledProcessError as exc:
             error_text = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else str(exc)
-            raise HTTPException(status_code=500, detail=f"FFmpeg could not process downloaded audio: {error_text}") from exc
-        except VideoDownloadError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=f"FFmpeg could not process this audio chunk: {error_text}") from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Processing failed: {exc}") from exc
+        finally:
+            await file.close()
+
+
+def extension_from_content_type(content_type: Optional[str]) -> str:
+    if content_type == "audio/webm" or content_type == "video/webm":
+        return ".webm"
+    if content_type == "audio/ogg":
+        return ".ogg"
+    if content_type == "audio/wav":
+        return ".wav"
+    if content_type == "audio/mp4":
+        return ".m4a"
+    return ""
