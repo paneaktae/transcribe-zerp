@@ -1,0 +1,10 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+python-dotenv==1.0.1
+yt-dlp==2024.12.23
+faster-whisper==1.1.0
+transformers==4.47.1
+torch==2.5.1
+sentencepiece==0.2.0
+protobuf==5.29.2
