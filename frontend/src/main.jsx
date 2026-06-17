@@ -241,18 +241,22 @@ function App() {
   }
 
   function appendLiveChunk(chunk) {
-    const transcript = (chunk.transcript || '').trim();
-    const translation = (chunk.translation_thai || '').trim();
-    if (!transcript && !translation) return;
+    const original = (chunk.transcript_original || '').trim();
+    const english = (chunk.transcript_english || '').trim();
+    const thai = (chunk.translation_thai || '').trim();
+    if (!original && !english && !thai) return;
 
-    const signature = transcript.toLowerCase();
+    const signature = original.toLowerCase();
     if (signature && seenChunkTextRef.current.has(signature)) return;
     if (signature) seenChunkTextRef.current.add(signature);
 
     setLiveResult((current) => ({
       detected_language: chunk.detected_language || current.detected_language,
-      transcript: appendText(current.transcript, transcript),
-      translation_thai: appendText(current.translation_thai, translation),
+      transcript_original: appendText(current.transcript_original, original),
+      transcript_english: appendText(current.transcript_english, english),
+      translation_thai: appendText(current.translation_thai, thai),
+      translation_path: chunk.translation_path || current.translation_path,
+      warnings: mergeWarnings(current.warnings, chunk.warnings),
       chunks: [...current.chunks, chunk],
       segments: [...current.segments, ...(chunk.segments || [])],
     }));
@@ -286,15 +290,25 @@ function App() {
     const active = getActiveResult(mode, result, liveResult);
     if (!active) return;
     const segmentText = (active.segments || [])
-      .map((segment) => `[${formatTime(segment.start)} - ${formatTime(segment.end)}] ${segment.text}`)
+      .map((segment) => [
+        `[${formatTime(segment.start)} - ${formatTime(segment.end)}]`,
+        `Original: ${segment.text_original || ''}`,
+        `English: ${segment.text_english || ''}`,
+        `Thai: ${segment.text_thai || ''}`,
+      ].join('\n'))
       .join('\n');
     const body = [
       `Source type: ${mode === 'live' ? 'live-video' : active.source_type || mode}`,
       videoUrl && mode === 'live' ? `Video URL: ${videoUrl}` : '',
       `Detected language: ${active.detected_language || 'unknown'}`,
+      `Translation path: ${formatTranslationPath(active)}`,
+      active.warnings?.length ? `Warnings: ${active.warnings.join('; ')}` : '',
       '',
       'Original transcript:',
-      active.transcript,
+      active.transcript_original,
+      '',
+      'English transcript:',
+      active.transcript_english,
       '',
       'Thai translation:',
       active.translation_thai,
@@ -389,7 +403,7 @@ function App() {
               onDownload={downloadResult}
               isRecording={isRecording}
               isPaused={status === 'paused'}
-              hasTranscript={Boolean(liveResult.transcript || liveResult.translation_thai)}
+              hasTranscript={Boolean(liveResult.transcript_original || liveResult.transcript_english || liveResult.translation_thai)}
               captureWarning={captureWarning}
             />
           )}
@@ -397,13 +411,27 @@ function App() {
 
         {error && <div className="error-box">{error}</div>}
 
-        <section className="result-grid" aria-label="Transcription result">
+        {activeResult && (
+          <div className="path-indicator">
+            <strong>{formatTranslationPath(activeResult)}</strong>
+            {activeResult.warnings?.length ? <span>{activeResult.warnings.join(' ')}</span> : null}
+          </div>
+        )}
+
+        <section className="result-grid result-grid-three" aria-label="Transcription result">
           <ResultPane
             title="Original transcript"
             subtitle={activeResult ? `Detected language: ${activeResult.detected_language || 'unknown'}` : 'Waiting for transcription'}
-            text={activeResult?.transcript}
-            onCopy={() => copyText('transcript', activeResult?.transcript)}
-            copied={copied === 'transcript'}
+            text={activeResult?.transcript_original}
+            onCopy={() => copyText('original', activeResult?.transcript_original)}
+            copied={copied === 'original'}
+          />
+          <ResultPane
+            title={activeResult?.detected_language === 'en' ? 'English transcript' : 'English translation'}
+            subtitle={activeResult ? 'Intermediate transcript' : 'English text will appear here'}
+            text={activeResult?.transcript_english}
+            onCopy={() => copyText('english', activeResult?.transcript_english)}
+            copied={copied === 'english'}
           />
           <ResultPane
             title="Thai translation"
@@ -424,7 +452,7 @@ function App() {
               {liveResult.chunks.map((chunk) => (
                 <div className="segment-row" key={chunk.chunk_id}>
                   <time>{chunk.chunk_id}</time>
-                  <p>{chunk.transcript || 'No speech detected.'}</p>
+                  <p>{chunk.transcript_original || 'No speech detected.'}</p>
                 </div>
               ))}
             </div>
@@ -433,7 +461,7 @@ function App() {
               {activeResult.segments.map((segment, index) => (
                 <div className="segment-row" key={`${segment.start}-${segment.end}-${index}`}>
                   <time>{formatTime(segment.start)} - {formatTime(segment.end)}</time>
-                  <p>{segment.text}</p>
+                  <p>{segment.text_original}</p>
                 </div>
               ))}
             </div>
@@ -541,8 +569,11 @@ async function readJsonResponse(response) {
 function emptyLiveResult() {
   return {
     detected_language: '',
-    transcript: '',
+    transcript_original: '',
+    transcript_english: '',
     translation_thai: '',
+    translation_path: '',
+    warnings: [],
     segments: [],
     chunks: [],
   };
@@ -557,9 +588,20 @@ function appendText(current, next) {
 
 function getActiveResult(mode, fileResult, liveResult) {
   if (mode === 'live') {
-    return liveResult.transcript || liveResult.translation_thai || liveResult.chunks.length ? liveResult : null;
+    return liveResult.transcript_original || liveResult.transcript_english || liveResult.translation_thai || liveResult.chunks.length ? liveResult : null;
   }
   return fileResult;
+}
+
+function mergeWarnings(current = [], incoming = []) {
+  return Array.from(new Set([...current, ...incoming].filter(Boolean)));
+}
+
+function formatTranslationPath(result) {
+  if (!result?.translation_path) return '';
+  if (result.translation_path === 'original_to_thai') return 'English -> Thai';
+  const source = result.detected_language && result.detected_language !== 'unknown' ? result.detected_language.toUpperCase() : 'Detected language';
+  return `${source} -> English -> Thai`;
 }
 
 function chooseRecorderMimeType() {

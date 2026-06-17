@@ -373,6 +373,27 @@ button:disabled {
   margin-top: 18px;
 }
 
+.result-grid-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.path-indicator {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid #d9e3e0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #314749;
+}
+
+.path-indicator span {
+  color: #73570d;
+}
+
 .result-pane,
 .segments {
   min-width: 0;

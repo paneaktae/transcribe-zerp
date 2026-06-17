@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from typing import List
 
-from schemas import SegmentOut
+from schemas import RawSegment
 
 
 class WhisperTranscriber:
@@ -22,7 +22,7 @@ class WhisperTranscriber:
             self._model = WhisperModel(model_size, device=device, compute_type=compute_type)
         return self._model
 
-    def transcribe(self, audio_path: Path) -> tuple[str, str, List[SegmentOut]]:
+    def transcribe(self, audio_path: Path) -> tuple[str, str, List[RawSegment]]:
         segments_iter, info = self.model.transcribe(
             str(audio_path),
             beam_size=5,
@@ -30,7 +30,7 @@ class WhisperTranscriber:
             word_timestamps=False,
         )
         segments = [
-            SegmentOut(start=round(segment.start, 2), end=round(segment.end, 2), text=segment.text.strip())
+            RawSegment(start=round(segment.start, 2), end=round(segment.end, 2), text=segment.text.strip())
             for segment in segments_iter
         ]
         transcript = " ".join(segment.text for segment in segments).strip()

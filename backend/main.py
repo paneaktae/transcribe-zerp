@@ -10,9 +10,9 @@ from dotenv import load_dotenv
 from fastapi import File, Form, FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from schemas import ChunkTranscriptionResponse, TranscriptionResponse
+from schemas import ChunkTranscriptionResponse, RawSegment, SegmentOut, TranscriptionResponse
 from transcriber import WhisperTranscriber, extract_audio
-from translator import ThaiTranslator
+from translator import ThaiTranslator, TranslationResult
 
 
 load_dotenv(Path(__file__).with_name(".env"))
@@ -60,14 +60,17 @@ async def transcribe(file: UploadFile = File(...)) -> TranscriptionResponse:
 
             extract_audio(uploaded_path, audio_path)
             detected_language, transcript, segments = transcriber.transcribe(audio_path)
-            translation_thai = translator.translate(transcript, detected_language)
+            translation = translator.translate_pipeline(transcript, detected_language)
 
             return TranscriptionResponse(
                 source_type="upload",
-                detected_language=detected_language,
-                transcript=transcript,
-                translation_thai=translation_thai,
-                segments=segments,
+                detected_language=translation.detected_language,
+                transcript_original=translation.transcript_original,
+                transcript_english=translation.transcript_english,
+                translation_thai=translation.translation_thai,
+                translation_path=translation.translation_path,
+                warnings=translation.warnings,
+                segments=translate_segments(segments, translation.detected_language),
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -103,14 +106,17 @@ async def transcribe_chunk(
 
             extract_audio(chunk_path, audio_path)
             detected_language, transcript, segments = transcriber.transcribe(audio_path)
-            translation_thai = translator.translate(transcript, detected_language) if transcript else ""
+            translation = translator.translate_pipeline(transcript, detected_language)
 
             return ChunkTranscriptionResponse(
                 chunk_id=resolved_chunk_id,
-                detected_language=detected_language,
-                transcript=transcript,
-                translation_thai=translation_thai,
-                segments=segments,
+                detected_language=translation.detected_language,
+                transcript_original=translation.transcript_original,
+                transcript_english=translation.transcript_english,
+                translation_thai=translation.translation_thai,
+                translation_path=translation.translation_path,
+                warnings=translation.warnings,
+                segments=translate_segments(segments, translation.detected_language),
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -133,3 +139,19 @@ def extension_from_content_type(content_type: Optional[str]) -> str:
     if content_type == "audio/mp4":
         return ".m4a"
     return ""
+
+
+def translate_segments(segments: list[RawSegment], detected_language: str) -> list[SegmentOut]:
+    translated_segments: list[SegmentOut] = []
+    for segment in segments:
+        segment_translation: TranslationResult = translator.translate_pipeline(segment.text, detected_language)
+        translated_segments.append(
+            SegmentOut(
+                start=segment.start,
+                end=segment.end,
+                text_original=segment_translation.transcript_original,
+                text_english=segment_translation.transcript_english,
+                text_thai=segment_translation.translation_thai,
+            )
+        )
+    return translated_segments

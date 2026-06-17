@@ -22,6 +22,16 @@ README.md
 
 The default Whisper model is `small` on CPU with `int8` compute. The default translation model is `facebook/nllb-200-distilled-600M`, which is free and local after download, but can be large on first run.
 
+## Translation Pipeline
+
+After transcription, the backend normalizes the detected language from faster-whisper and uses a two-step translation pipeline:
+
+- English audio: original transcript -> Thai
+- Non-English audio: original transcript -> English -> Thai
+- Unknown language: attempts original transcript -> English -> Thai and returns a warning
+
+The English intermediate is returned so users can inspect the pivot text before the Thai translation. This is useful because multilingual models often produce more consistent Thai output when non-English speech is routed through English first, and it gives a readable checkpoint for debugging translation quality.
+
 ## Backend Setup
 
 ```bash
@@ -174,13 +184,18 @@ Example response:
   "source_url": null,
   "video_title": null,
   "detected_language": "en",
-  "transcript": "Hello, this is a test.",
+  "transcript_original": "Hello, this is a test.",
+  "transcript_english": "Hello, this is a test.",
   "translation_thai": "สวัสดี นี่คือการทดสอบ",
+  "translation_path": "original_to_thai",
+  "warnings": [],
   "segments": [
     {
       "start": 0.0,
       "end": 4.2,
-      "text": "Hello, this is a test."
+      "text_original": "Hello, this is a test.",
+      "text_english": "Hello, this is a test.",
+      "text_thai": "สวัสดี นี่คือการทดสอบ"
     }
   ]
 }
@@ -201,13 +216,18 @@ Example response:
 {
   "chunk_id": "chunk-123",
   "detected_language": "en",
-  "transcript": "Hello from this audio chunk.",
+  "transcript_original": "Hello from this audio chunk.",
+  "transcript_english": "Hello from this audio chunk.",
   "translation_thai": "สวัสดีจากส่วนเสียงนี้",
+  "translation_path": "original_to_thai",
+  "warnings": [],
   "segments": [
     {
       "start": 0.0,
       "end": 4.2,
-      "text": "Hello from this audio chunk."
+      "text_original": "Hello from this audio chunk.",
+      "text_english": "Hello from this audio chunk.",
+      "text_thai": "สวัสดีจากส่วนเสียงนี้"
     }
   ]
 }

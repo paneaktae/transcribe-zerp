@@ -1,13 +1,24 @@
 import os
+from dataclasses import dataclass, field
 from typing import List
 
 
-class ThaiTranslator:
-    """Adapter around a local Hugging Face translation model.
+@dataclass
+class TranslationResult:
+    detected_language: str
+    transcript_original: str
+    transcript_english: str
+    translation_thai: str
+    translation_path: str
+    warnings: List[str] = field(default_factory=list)
 
-    Defaults to NLLB distilled because it supports many source languages. Keep
-    this class isolated if you want to swap in Argos Translate or a smaller
-    language-specific model later.
+
+class ThaiTranslator:
+    """Pluggable adapter around a local Hugging Face translation model.
+
+    Defaults to NLLB distilled because it supports many source languages. The
+    public method is `translate_pipeline`; replace `_translate_text` to swap
+    translator backends without changing API code.
     """
 
     NLLB_CODES = {
@@ -32,12 +43,88 @@ class ThaiTranslator:
         "hi": "hin_Deva",
     }
 
+    LANGUAGE_ALIASES = {
+        "eng": "en",
+        "english": "en",
+        "tha": "th",
+        "thai": "th",
+        "zh-cn": "zh",
+        "zh-tw": "zh",
+        "cmn": "zh",
+        "jpn": "ja",
+        "kor": "ko",
+        "spa": "es",
+        "deu": "de",
+        "fra": "fr",
+        "fre": "fr",
+        "por": "pt",
+        "rus": "ru",
+    }
+
     def __init__(self) -> None:
         self._tokenizer = None
         self._model = None
         self._pipeline = None
         self.model_name = os.getenv("TRANSLATION_MODEL", "facebook/nllb-200-distilled-600M")
         self.max_chunk_chars = int(os.getenv("TRANSLATION_MAX_CHUNK_CHARS", "1200"))
+        self.min_translate_chars = int(os.getenv("TRANSLATION_MIN_CHARS", "2"))
+
+    def translate_pipeline(self, text: str, source_lang: str) -> TranslationResult:
+        original = text.strip()
+        normalized_source = self.normalize_language(source_lang)
+        warnings: List[str] = []
+
+        if not original:
+            return TranslationResult(
+                detected_language=normalized_source,
+                transcript_original="",
+                transcript_english="",
+                translation_thai="",
+                translation_path="original_to_thai" if normalized_source == "en" else "original_to_english_to_thai",
+                warnings=[],
+            )
+
+        if len(original) < self.min_translate_chars:
+            warnings.append("Transcript too short to translate reliably.")
+            return TranslationResult(
+                detected_language=normalized_source,
+                transcript_original=original,
+                transcript_english=original if normalized_source == "en" else "",
+                translation_thai="",
+                translation_path="original_to_thai" if normalized_source == "en" else "original_to_english_to_thai",
+                warnings=warnings,
+            )
+
+        if normalized_source == "unknown":
+            warnings.append("Language could not be detected reliably; attempted original-to-English first.")
+
+        if normalized_source == "en":
+            english = original
+            thai = self._translate_text(english, "en", "th")
+            path = "original_to_thai"
+        else:
+            english = self._translate_text(original, normalized_source, "en")
+            thai = self._translate_text(english, "en", "th") if english.strip() else ""
+            path = "original_to_english_to_thai"
+
+        return TranslationResult(
+            detected_language=normalized_source,
+            transcript_original=original,
+            transcript_english=english,
+            translation_thai=thai,
+            translation_path=path,
+            warnings=warnings,
+        )
+
+    def normalize_language(self, source_lang: str) -> str:
+        value = (source_lang or "").strip().lower().replace("_", "-")
+        if not value or value in {"und", "unknown", "none", "null"}:
+            return "unknown"
+        value = self.LANGUAGE_ALIASES.get(value, value)
+        value = value.split("-")[0]
+        if value in self.NLLB_CODES:
+            return value
+        return "unknown"
 
     def _load(self):
         if self._pipeline is None:
@@ -48,14 +135,15 @@ class ThaiTranslator:
             self._pipeline = pipeline("translation", model=self._model, tokenizer=self._tokenizer)
         return self._pipeline
 
-    def translate(self, text: str, source_language: str) -> str:
+    def _translate_text(self, text: str, source_language: str, target_language: str) -> str:
         if not text.strip():
             return ""
-        if source_language == "th":
-            return text
+        if source_language == target_language:
+            return text.strip()
 
         pipe = self._load()
         src_lang = self.NLLB_CODES.get(source_language, "eng_Latn")
+        tgt_lang = self.NLLB_CODES.get(target_language, "eng_Latn")
 
         if hasattr(self._tokenizer, "src_lang"):
             self._tokenizer.src_lang = src_lang
@@ -65,7 +153,7 @@ class ThaiTranslator:
             result = pipe(
                 chunk,
                 src_lang=src_lang,
-                tgt_lang="tha_Thai",
+                tgt_lang=tgt_lang,
                 max_length=512,
             )
             translated_chunks.append(result[0]["translation_text"].strip())
