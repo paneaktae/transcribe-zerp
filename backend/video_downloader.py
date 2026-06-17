@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -55,7 +56,7 @@ def download_audio_from_url(url: str, temp_dir: Path) -> DownloadedVideo:
 
     output_template = str(temp_dir / "%(title).80s-%(id)s.%(ext)s")
     command = [
-        "yt-dlp",
+        *yt_dlp_command_prefix(),
         "--no-playlist",
         "--extract-audio",
         "--audio-format",
@@ -117,7 +118,7 @@ def validate_video_url(url: str) -> None:
 
 def get_video_metadata(url: str, timeout: int) -> dict:
     command = [
-        "yt-dlp",
+        *yt_dlp_command_prefix(),
         "--dump-single-json",
         "--no-playlist",
         "--skip-download",
@@ -166,8 +167,14 @@ def find_downloaded_audio(stdout: str, temp_dir: Path) -> Path:
 
 
 def ensure_yt_dlp() -> None:
-    if shutil.which("yt-dlp") is None:
-        raise FileNotFoundError("yt-dlp is not installed or not available on PATH.")
+    try:
+        import yt_dlp  # noqa: F401
+    except ImportError as exc:
+        raise FileNotFoundError("yt-dlp is not installed in the active Python environment.") from exc
+
+
+def yt_dlp_command_prefix() -> list[str]:
+    return [sys.executable, "-m", "yt_dlp"]
 
 
 def ensure_ffmpeg() -> None:
