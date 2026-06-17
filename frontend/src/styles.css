@@ -99,6 +99,34 @@ h1 {
   padding: 18px;
 }
 
+.backend-field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.backend-field span {
+  color: #42595a;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.backend-field input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #b9c9c6;
+  border-radius: 8px;
+  color: #162527;
+  background: #ffffff;
+  font: inherit;
+}
+
+.backend-field input:focus {
+  border-color: #0f6f73;
+  outline: 3px solid #d8efed;
+}
+
 .segmented {
   display: inline-flex;
   gap: 4px;

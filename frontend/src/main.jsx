@@ -3,7 +3,9 @@ import { createRoot } from 'react-dom/client';
 import { Check, Clipboard, Download, FileAudio, Link, Loader2, Upload, X } from 'lucide-react';
 import './styles.css';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const LOCAL_API_URL = 'http://localhost:8000';
+const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const DEFAULT_API_URL = import.meta.env.VITE_API_URL || (isLocalHost ? LOCAL_API_URL : '');
 const ACCEPTED_TYPES = '.mp3,.wav,.m4a,.mp4,.mov,.aac,.flac,.ogg,.webm,audio/*,video/*';
 const URL_PROGRESS_STAGES = ['validating', 'downloading', 'extracting', 'transcribing', 'translating'];
 
@@ -16,6 +18,7 @@ function App() {
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
   const [copied, setCopied] = useState('');
+  const [apiUrl, setApiUrl] = useState(() => localStorage.getItem('transcribe-api-url') || DEFAULT_API_URL);
 
   const statusLabel = useMemo(() => {
     const labels = {
@@ -51,6 +54,12 @@ function App() {
   }
 
   async function submitFile() {
+    const backendUrl = getBackendUrl(apiUrl);
+    if (!backendUrl) {
+      setError('Set a public FastAPI backend URL before transcribing.');
+      setStatus('error');
+      return;
+    }
     if (!file) {
       setError('Choose an audio or video file first.');
       setStatus('error');
@@ -64,7 +73,7 @@ function App() {
     setStatus('uploading');
 
     try {
-      const responsePromise = fetch(`${API_URL}/api/transcribe`, {
+      const responsePromise = fetch(`${backendUrl}/api/transcribe`, {
         method: 'POST',
         body: formData,
       });
@@ -77,12 +86,18 @@ function App() {
       setResult(data);
       setStatus('complete');
     } catch (requestError) {
-      setError(formatRequestError(requestError));
+      setError(formatRequestError(requestError, backendUrl));
       setStatus('error');
     }
   }
 
   async function submitUrl() {
+    const backendUrl = getBackendUrl(apiUrl);
+    if (!backendUrl) {
+      setError('Set a public FastAPI backend URL before transcribing.');
+      setStatus('error');
+      return;
+    }
     const trimmedUrl = videoUrl.trim();
     if (!trimmedUrl) {
       setError('Paste a YouTube URL first.');
@@ -96,7 +111,7 @@ function App() {
 
     let stageTimer = null;
     try {
-      const responsePromise = fetch(`${API_URL}/api/transcribe-url`, {
+      const responsePromise = fetch(`${backendUrl}/api/transcribe-url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: trimmedUrl }),
@@ -112,10 +127,20 @@ function App() {
       setResult(data);
       setStatus('complete');
     } catch (requestError) {
-      setError(formatRequestError(requestError));
+      setError(formatRequestError(requestError, backendUrl));
       setStatus('error');
     } finally {
       if (stageTimer) window.clearInterval(stageTimer);
+    }
+  }
+
+  function updateApiUrl(value) {
+    setApiUrl(value);
+    const normalized = value.trim();
+    if (normalized) {
+      localStorage.setItem('transcribe-api-url', normalized);
+    } else {
+      localStorage.removeItem('transcribe-api-url');
     }
   }
 
@@ -171,6 +196,17 @@ function App() {
         </div>
 
         <section className="input-panel">
+          <label className="backend-field">
+            <span>Backend API URL</span>
+            <input
+              type="url"
+              value={apiUrl}
+              onChange={(event) => updateApiUrl(event.target.value)}
+              placeholder="https://your-fastapi-backend.example.com"
+              disabled={isBusy}
+            />
+          </label>
+
           <div className="segmented" role="tablist" aria-label="Source type">
             <button className={mode === 'upload' ? 'active' : ''} type="button" onClick={() => switchMode('upload')} disabled={isBusy}>
               <FileAudio size={17} />
@@ -328,9 +364,13 @@ function downloadBaseName(result, file) {
   return stripExtension(file?.name || 'transcription');
 }
 
-function formatRequestError(error) {
+function getBackendUrl(value) {
+  return value.trim().replace(/\/+$/, '');
+}
+
+function formatRequestError(error, backendUrl) {
   if (error?.message === 'Failed to fetch') {
-    return `Cannot reach the backend at ${API_URL}. Start FastAPI on port 8000, then try again.`;
+    return `Cannot reach the backend at ${backendUrl}. Check that FastAPI is deployed, reachable over HTTPS, and allows this frontend origin.`;
   }
   return error?.message || 'Processing failed.';
 }

@@ -83,6 +83,64 @@ To point the frontend at a different backend URL:
 VITE_API_URL=http://localhost:8000 npm run dev
 ```
 
+## Deployment
+
+Deploy the frontend and backend separately.
+
+The Vite frontend can run on Vercel. The FastAPI backend should run on a server or container platform that supports:
+
+- long-running Python processes
+- FFmpeg
+- yt-dlp
+- large model downloads
+- enough CPU and memory for `faster-whisper` and the translation model
+
+Vercel serverless functions are not a good fit for this backend because speech transcription and translation can take longer than typical serverless limits and require large local model files.
+
+### Deploy Frontend to Vercel
+
+From the frontend folder:
+
+```bash
+cd frontend
+npm install
+npm run build
+npx vercel deploy --prod
+```
+
+If the backend is already deployed, set the production frontend environment variable before deploying:
+
+```bash
+VITE_API_URL=https://your-fastapi-backend.example.com npm run build
+```
+
+The deployed frontend also includes a `Backend API URL` field. Paste the public FastAPI backend URL there if `VITE_API_URL` was not set at build time.
+
+### Deploy Backend as a Container
+
+The backend includes [backend/Dockerfile](backend/Dockerfile). Build and run it locally:
+
+```bash
+cd backend
+docker build -t transcribe-zerp-backend .
+docker run --rm -p 8000:8000 \
+  -e CORS_ALLOW_ORIGINS=https://transcribe-zerp.vercel.app \
+  transcribe-zerp-backend
+```
+
+Deploy the same Dockerfile to a container host such as Fly.io, Railway, Render, a VPS, or another service that can run CPU-heavy containers. Set:
+
+```bash
+CORS_ALLOW_ORIGINS=https://transcribe-zerp.vercel.app
+WHISPER_MODEL_SIZE=small
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+VIDEO_MAX_DURATION_SECONDS=1800
+VIDEO_MAX_FILE_SIZE=500M
+```
+
+After the backend has a public HTTPS URL, enter it in the frontend `Backend API URL` field or redeploy the frontend with `VITE_API_URL` set to that URL.
+
 ## Environment Variables
 
 Backend variables can be set in your shell or in `backend/.env`. The FastAPI app loads `backend/.env` automatically.
