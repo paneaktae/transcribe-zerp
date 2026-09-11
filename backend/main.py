@@ -42,6 +42,16 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "status": "ok",
+        "service": "Transcribe backend API",
+        "frontend": "Open http://127.0.0.1:5173/ for the web app.",
+        "health": "http://127.0.0.1:8000/api/health",
+    }
+
+
 @app.post("/api/transcribe", response_model=TranscriptionResponse)
 async def transcribe(file: UploadFile = File(...)) -> TranscriptionResponse:
     extension = Path(file.filename or "").suffix.lower()
